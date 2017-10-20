@@ -1,8 +1,9 @@
 (** Binding to the Dropbox
     {{:https://www.dropbox.com/developers/core/docs}Remote API}. *)
 
-type error_description = { error: string;
-                           error_description: string }
+type tagged = Dropbox_t.tagged = {tag:string}
+
+type error_description = { error_summary: string; error: tagged }
 
 type error =
   | Invalid_arg of error_description
@@ -172,8 +173,6 @@ module type S = sig
         familiar_name: string;
         display_name: string;
         abbreviated_name: string }
-
-  type tagged = Dropbox_t.tagged = {tag:string}
 
   type sharing_policies = Dropbox_t.sharing_policies = {
     shared_folder_member_policy: tagged;

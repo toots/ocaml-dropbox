@@ -1,7 +1,9 @@
 (* 								-*-tuareg-*- *)
 
-type error_description = { ~error: string;
-                           ~error_description: string }
+type tagged = { tag <json name=".tag">: string }
+
+type error_description = { ~error_summary: string;
+                           error: tagged }
 
 type token = { access_token: string;
                (* token_type: string; (* always "bearer" *) *)
@@ -12,8 +14,6 @@ type name_details = { given_name: string;
                       familiar_name: string;
                       display_name: string;
                       abbreviated_name: string }
-
-type tagged = { tag <json name=".tag">: string }
 
 type sharing_policies = {
   shared_folder_member_policy: tagged;

@@ -8,9 +8,10 @@ module Date = Dropbox_date
 (* Error handling
  ***********************************************************************)
 
+type tagged = Json.tagged = {tag:string}
+
 type error_description = Json.error_description
-                       = { error: string;
-                           error_description: string }
+                       = { error_summary: string; error: tagged }
 
 type error =
   | Invalid_arg of error_description
@@ -141,8 +142,6 @@ module type S = sig
         familiar_name: string;
         display_name: string;
         abbreviated_name: string }
-
-  type tagged = Dropbox_t.tagged = {tag:string}
 
   type sharing_policies = Dropbox_t.sharing_policies = {
     shared_folder_member_policy: tagged;
@@ -439,9 +438,11 @@ module Make(Client: Cohttp_lwt.Client) = struct
 
   let session token = token
 
-  let headers (t: t) =
+  let headers ?(content=[]) (t: t) =
     let bearer = "Bearer " ^ (token t) in
-    Cohttp.Header.init_with "Authorization" bearer
+    Cohttp.Header.add_list (Cohttp.Header.init ())
+      (("Authorization",bearer)::
+       ("Content-Type","application/octet-stream")::content)
 
   let info_uri = Uri.of_string "https://api.dropbox.com/2/users/get_current_account"
 
@@ -462,9 +463,12 @@ module Make(Client: Cohttp_lwt.Client) = struct
        k metadata body
     | None ->
        (* Should not happen *)
+       let tag =
+         {tag="Missing x-dropbox-metadata header"}
+       in
        let msg = {
-           error = "x-dropbox-metadata";
-           error_description = "Missing x-dropbox-metadata header" } in
+           error_summary = "x-dropbox-metadata";
+           error = tag} in
        fail(Error(Server_error(500, msg)))
 
   let stream_of_file =
@@ -742,7 +746,6 @@ module Make(Client: Cohttp_lwt.Client) = struct
 
   let upload_session_append t ?(close=false) ~offset session_id chunked_data =
     let u = upload_session_uri "append_v2" in
-    let headers = headers t in
     let cursor =
       {session_id=session_id;offset=offset}
     in
@@ -753,7 +756,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
       Dropbox_j.string_of_upload_session_append params
     in
     let headers =
-      Cohttp.Header.add headers "Dropbox-API-Arg" payload
+      headers ~content:[("Dropbox-API-Arg",payload)] t
     in
     Client.post ~body:(chunked_data :> Cohttp_lwt_body.t)
                 ~headers ~chunked:true u
@@ -762,7 +765,6 @@ module Make(Client: Cohttp_lwt.Client) = struct
   let finish_upload_session t ?(mode="add") ?(mute=false) ?(overwrite=true)
                               ?(autorename=false) ~offset ~path session_id =
     let u = upload_session_uri "finish" in
-    let headers = headers t in
     let cursor =
       {session_id=session_id;offset=offset}
     in
@@ -776,9 +778,9 @@ module Make(Client: Cohttp_lwt.Client) = struct
       Dropbox_j.string_of_upload_session_finish params
     in
     let headers =
-      Cohttp.Header.add headers "Dropbox-API-Arg" payload
+      headers ~content:["Dropbox-API-Arg",payload] t
     in
-    Client.post ~headers u
+    Client.post ~headers ~body:(`String "") u
     >>= check_errors >>= fun (_, body) ->
     Cohttp_lwt_body.to_string body >>= fun body ->
     return(Json.metadata_of_string body)
@@ -811,9 +813,12 @@ module Make(Client: Cohttp_lwt.Client) = struct
        return(Some(content_type, content_length, body_stream))
     | _ , _ ->
        (* Should not happen *)
+       let tag = {
+          tag = "Missing content-length or content-type header"
+       } in
        let msg = {
-           error = "content-length/type";
-           error_description = "Missing content-length or content-type header"
+           error_summary = "content-length/type";
+           error = tag
          } in
        fail(Error(Server_error(500, msg)))
 
@@ -842,10 +847,10 @@ module Make(Client: Cohttp_lwt.Client) = struct
   let error_oauth_or_invalid body =
     Cohttp_lwt_body.to_string body >>= fun body ->
     let e = Json.error_description_of_string body in
-    if is_OAuth_substring e.error then
+    if is_OAuth_substring e.error_summary then
       fail(Error(Invalid_oauth e))
     else
-      return(`Invalid e.error)
+      return(`Invalid e.error_summary)
 
   let metadata_of_response (_, body) =
     Cohttp_lwt_body.to_string body >>= fun body ->
