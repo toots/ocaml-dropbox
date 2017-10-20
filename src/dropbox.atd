@@ -144,7 +144,7 @@ type create_link_result = {
   name: string;
   link_permissions: create_link_permissions;
   id: string;
-  expires: date;
+  ?expires: date option;
   ?path_lower: string option }
 
 type shared_link = { url: string;

@@ -284,7 +284,7 @@ module type S = sig
     name: string;
     link_permissions: create_link_permissions;
     id: string;
-    expires: Dropbox_date.t;
+    expires: Dropbox_date.t option;
     path_lower: string option
   }
 
