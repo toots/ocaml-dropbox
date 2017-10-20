@@ -167,42 +167,41 @@ module type S = sig
 
   type name_details
     = Dropbox_t.name_details
-    = { familiar_name: string; (** The locale-dependent familiar name
-                                   for the user. *)
-        given_name: string; (** The user's given name. *)
-        surname: string;    (** The user's surname. *)
-      }
+    = { given_name: string;
+        surname: string;
+        familiar_name: string;
+        display_name: string;
+        abbreviated_name: string }
+
+  type tagged = Dropbox_t.tagged = {tag:string}
+
+  type sharing_policies = Dropbox_t.sharing_policies = {
+    shared_folder_member_policy: tagged;
+    shared_folder_join_policy: tagged;
+    shared_link_create_policy: tagged
+  }
 
   type team = Dropbox_t.team
-            = { name: string; (** The name of the team the user belongs to. *)
-                team_id: int; (** The ID of the team the user belongs to. *)
-              }
-
-  type quota_info
-    = Dropbox_t.quota_info
-    = { shared: int; (** The user's used quota outside of shared
-                         folders (bytes). *)
-        quota: int;  (** The user's used quota in shared folders (bytes). *)
-        normal: int; (** The user's total quota allocation (bytes). *)
-      }
+            = { name: string;
+                sharing_policies: sharing_policies;
+                office_addin_policy: tagged;
+                id: string }
 
   type info
     = Dropbox_t.info
-    = { uid: int; (** The user's unique Dropbox ID. *)
-        display_name: string; (** The user's display name. *)
+    = { account_id: string;
+        name: name_details;
+        email: string;
         email_verified: bool;
-        name_details: name_details;
+        disabled: bool;
+        locale: string;
         referral_link: Uri.t;
-        (** The user's {{:https://www.dropbox.com/referrals}referral link}. *)
-        country: string;
-        (** The user's two-letter country code, if available. *)
-        locale: string; (** Locale preference set by the user (e.g. en-us). *)
         is_paired: bool;
-        (** If true, there is a paired account associated with this user. *)
+        account_type: tagged;
+        profile_photo_url: string option;
+        country: string;
         team: team option;
-        (** If the user belongs to a team, contains team information. *)
-        quota_info: quota_info;
-      }
+        team_member_id: string }
 
   val info : ?locale: string -> t -> info Lwt.t
   (** [info t] return the information about the user's account.
@@ -267,72 +266,26 @@ module type S = sig
         groups: group list
       }
 
+  type sharing_info = Dropbox_t.sharing_info = {
+    read_only: bool;
+    parent_shared_folder_id: string;
+    modified_by: string
+  }
+
   type metadata = Dropbox_t.metadata = {
-      size: string;
-      (** A human-readable description of the file size (translated by
-          locale). *)
-      bytes: int;      (** The file size in bytes. *)
-      mime_type: string;
-      path: string;    (** The canonical path to the file or folder. *)
-      is_dir: bool;    (** Whether the given entry is a folder or not. *)
-      is_deleted: bool; (** Whether the given entry is deleted.  (Only
-                            interesting if deleted files are returned.)  *)
-      rev: string;
-      (** A unique identifier for the current revision of a file.  This
-          field is the same [rev] as elsewhere in the API and can be
-          used to detect changes and avoid conflicts. *)
-      hash: string;
-      (** A folder's hash is useful for indicating changes to the
-          folder's contents in later calls to {!metadata}.  This is
-          roughly the folder equivalent to a file's [rev].  (Is [""]
-          for a file.) *)
-      thumb_exists: bool;
-      (** True if the file is an image that can be converted to a
-          thumbnail via the {!thumbnails} call. *)
-      photo_info: [ `None | `Pending | `Some of photo_info ];
-      (** Only returned when the include_media_info parameter is true and the
-          file is an image. A dictionary that includes the creation time
-          (time_taken) and the GPS coordinates (lat_long). *)
-      video_info: [ `None | `Pending | `Some of video_info ];
-      (** Only returned when the include_media_info parameter is true and the
-          file is a video. A dictionary that includes the creation time
-          (time_taken), the GPS coordinates (lat_long), and the length of the
-          video in milliseconds (duration). *)
-      icon: string;
-      (** The name of the icon used to illustrate the file type in Dropbox's
-          {{:https://www.dropbox.com/static/images/dropbox-api-icons.zip}icon
-          library}. *)
-      modified: Date.t option;
-      (** The last time the file was modified on Dropbox (not included
-          for the root folder).  *)
-      client_mtime: Date.t option;
-      (** For files, this is the modification time set by the desktop
-          client when the file was added to Dropbox.  Since this time
-          is not verified (the Dropbox server stores whatever the
-          desktop client sends up), this should only be used for
-          display purposes (such as sorting) and not, for example, to
-          determine if a file has changed or not. *)
-      root: [ `Dropbox | `App_folder ];
-      (** The root or top-level folder depending on your access
-          level. All paths returned are relative to this root level. *)
-      contents: metadata list;
-      (** For folders, contents is the list of the metadata of the files
-          contained in this folder. Return nothing if the folder is empty. *)
-      shared_folder: shared_folder option;
-      (** This field will be included for shared folders.
-          See [shared_folder] for a sample shared folder response. *)
-      read_only: bool;
-      (** For shared folders, this field specifies whether the user has
-          read-only access to the folder. For files within a shared folder,
-          this specifies the read-only status of the parent shared folder. *)
-      parent_shared_folder_id: int;
-      (** For files within a shared folder, this field specifies the ID of
-          the containing shared folder. *)
-      modifier: user option
-      (** For files within a shared folder, this field specifies which user
-          last modified this file. If the modifying user no longer exists,
-          the value will be null.  *)
-    }
+    name: string;
+    id: string;
+    client_modified: Dropbox_date.t;
+    server_modified: Dropbox_date.t;
+    rev: string;
+    size: int;
+    path_lower: string option;
+    path_display: string option;
+    parent_shared_folder_id: string option;
+    sharing_info: sharing_info option;
+    has_explicit_shared_members: bool option;
+    content_hash: string
+  }
 
   type cursor
 
@@ -747,76 +700,13 @@ module type S = sig
       an [upload_id] or if there is no chunked upload matching the
       given [upload_id]. *)
 
-  type chunked_upload_id = private string
+  type session_id = private string
 
-  type chunked_upload
-    = { id: chunked_upload_id; (** The ID of the in-progress upload. *)
-        ofs: int;          (** The byte offset for the next chunk. *)
-        expires: Date.t    (** The time limit to finish the upload. *)
-      }
-
-  val chunked_upload :
-    t -> ?id: chunked_upload_id -> ?ofs: int ->
-    [ `String of string
-    | `Strings of string list
-    | `Stream of string Lwt_stream.t ] -> chunked_upload Lwt.t
-  (** [chunked_upload chunk] upload the [chunk] and return the ID and
-      offset for the subsequent upload of the same file.  This allows
-      to upload large files to Dropbox (larger than 150Mb which is the
-      limit for {!files_put}).  Chunks can be any size up to 150 MB.
-      A typical chunk is 4 MB.  Using large chunks will mean fewer
-      calls to {!chunked_upload} and faster overall throughput.
-      However, whenever a transfer is interrupted, you will have to
-      resume at the beginning of the last chunk, so it is often safer
-      to use smaller chunks.
-
-      @param id The unique ID of the in-progress upload on the server.
-      If not set, the server will create a new upload session.
-
-      @param ofs The byte offset of this chunk, relative to the
-      beginning of the full file. The server will verify that this
-      matches the offset it expects.  If it does not,
-      {!chunked_upload} will fail with an [Invalid_arg] error. *)
-
-  val commit_chunked_upload : t -> ?locale: string -> ?overwrite: bool ->
-                              ?parent_rev: string -> ?autorename: bool ->
-                              chunked_upload_id -> string -> metadata Lwt.t
-  (** [commit_chunked_upload upload_id path] complete the upload
-      initiated by {!chunked_upload}.  Save the uploaded data under
-      [path] and return the metadata for the uploaded file using
-      chunked_upload.  [upload_id] is used to identify the chunked
-      upload session you'd like to commit.
-
-      @param locale The metadata returned on successful upload will have its
-      size field translated based on the given locale.
-
-      @param overwrite This value, either [true] (default) or [false],
-      determines whether an existing file will be overwritten by this upload.
-      If [true], any existing file will be overwritten. If [false], the other
-      parameters determine whether a conflict occurs and how that conflict is
-      resolved.
-
-      @param parent_rev If present, this parameter specifies the [revision] of
-      the file you're editing. If parent_rev matches the latest version of the
-      file on the user's Dropbox, that file will be replaced. Otherwise, a
-      conflict will occur. (See below.) If you specify a parent_rev and that
-      [revision] doesn't exist, the file won't save. You can get the most
-      recent rev by performing a call to [metadata].
-
-      @param autorename This value, either [true] (default) or [false],
-      determines what happens when there is a conflict. If [true], the file
-      being uploaded will be automatically renamed to avoid the conflict.
-      (For example, test.txt might be automatically renamed to test (1).txt.)
-      The new name can be obtained from the returned metadata. If [false],
-      the call will fail with a Conflict response code.
-
-      Possible errors:
-      Fail with [Conflict] if a conflict occurred. This means a file
-      already existed at the specified path, [overwrite] was [false],
-      and the [parent_rev] (if specified) didn't match the current rev.
-
-      Fail with [Invalid_arg] if there is no chunked upload matching
-      the given [upload_id]. *)
+  val start_upload_session : t -> session_id Lwt.t
+  val upload_session_append : t -> ?close:bool -> offset:int -> session_id -> [ `String of string
+     | `Strings of string list
+     | `Stream of string Lwt_stream.t ] -> unit Lwt.t
+  val finish_upload_session : t -> ?mode:string -> ?mute:bool -> ?overwrite:bool -> ?autorename:bool -> offset:int -> path:string -> session_id -> metadata Lwt.t
 
   val thumbnails : t -> ?format: [ `Jpeg | `Png | `Bmp ]
                    -> ?size: [ `Xs | `S | `M | `L | `Xl ] -> string ->

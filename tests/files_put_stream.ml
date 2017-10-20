@@ -1,6 +1,7 @@
 open Lwt
 module D = Dropbox_lwt_unix
 
+(* Ignore for now
 let upload t fn =
   Lwt_unix.(openfile fn [O_RDONLY] 0) >>= fun fd ->
   Lwt_unix.stat fn >>= fun u ->
@@ -25,3 +26,4 @@ let main t args =
 
 let () =
   Common.run main
+*)

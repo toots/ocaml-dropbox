@@ -12,6 +12,7 @@ let print_search meta_list query =
          let paths = String.concat "\n" (List.map get_path meta_list) in
          Lwt_io.printlf "%s" paths
 
+(* Ignore for now
 let main t args =
   match args with
   | [query] -> D.search t query >>= fun search -> print_search search query
@@ -21,3 +22,4 @@ let main t args =
 
 let () =
   Common.run main
+*)

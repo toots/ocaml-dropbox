@@ -1,6 +1,7 @@
 open Lwt
 module D = Dropbox_lwt_unix
 
+(* Ignore for now
 let upload t fn =
   (* We first open the file and get its size *)
   Lwt_unix.(openfile fn [O_RDONLY] 0) >>= fun fd ->
@@ -48,3 +49,4 @@ let main t args =
 
 let () =
   Common.run main
+*)

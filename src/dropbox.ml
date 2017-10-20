@@ -134,31 +134,43 @@ module type S = sig
   val session : OAuth2.token -> t
   val token : t -> OAuth2.token
 
-  type name_details = Dropbox_t.name_details
-                    = { familiar_name: string;
-                        given_name: string;
-                        surname: string }
+  type name_details
+    = Dropbox_t.name_details
+    = { given_name: string;
+        surname: string;
+        familiar_name: string;
+        display_name: string;
+        abbreviated_name: string }
+
+  type tagged = Dropbox_t.tagged = {tag:string}
+
+  type sharing_policies = Dropbox_t.sharing_policies = {
+    shared_folder_member_policy: tagged;
+    shared_folder_join_policy: tagged;
+    shared_link_create_policy: tagged
+  }
 
   type team = Dropbox_t.team
             = { name: string;
-                team_id: int }
+                sharing_policies: sharing_policies;
+                office_addin_policy: tagged;
+                id: string }
 
-  type quota_info = Dropbox_t.quota_info
-                  = { shared: int;
-                      quota: int;
-                      normal: int }
-
-  type info = Dropbox_t.info
-            = { uid: int;
-                display_name: string;
-                email_verified: bool;
-                name_details: name_details;
-                referral_link: Uri.t;
-                country: string;
-                locale: string;
-                is_paired: bool;
-                team: team option;
-                quota_info: quota_info }
+  type info
+    = Dropbox_t.info
+    = { account_id: string;
+        name: name_details;
+        email: string;
+        email_verified: bool;
+        disabled: bool;
+        locale: string;
+        referral_link: Uri.t;
+        is_paired: bool;
+        account_type: tagged;
+        profile_photo_url: string option;
+        country: string;
+        team: team option;
+        team_member_id: string }
 
   val info : ?locale: string -> t -> info Lwt.t
 
@@ -197,27 +209,26 @@ module type S = sig
                          membership: user_info list;
                          groups: group list }
 
+  type sharing_info = Dropbox_t.sharing_info = {
+    read_only: bool;
+    parent_shared_folder_id: string;
+    modified_by: string
+  }
+
   type metadata = Dropbox_t.metadata = {
-      size: string;
-      bytes: int;
-      mime_type: string;
-      path: string;
-      is_dir: bool;
-      is_deleted: bool;
-      rev: string;
-      hash: string;
-      thumb_exists: bool;
-      photo_info: [ `None | `Pending | `Some of photo_info ];
-      video_info: [ `None | `Pending | `Some of video_info ];
-      icon: string;
-      modified: Date.t option;
-      client_mtime: Date.t option;
-      root: [ `Dropbox | `App_folder ];
-      contents: metadata list;
-      shared_folder: shared_folder option;
-      read_only: bool;
-      parent_shared_folder_id: int;
-      modifier: user option }
+    name: string;
+    id: string;
+    client_modified: Dropbox_date.t;
+    server_modified: Dropbox_date.t;
+    rev: string;
+    size: int;
+    path_lower: string option;
+    path_display: string option;
+    parent_shared_folder_id: string option;
+    sharing_info: sharing_info option;
+    has_explicit_shared_members: bool option;
+    content_hash: string
+  }
 
   type cursor
 
@@ -260,12 +271,7 @@ module type S = sig
         expires: Date.t;
         visibility: visibility }
 
-  type chunked_upload_id = private string
-
-  type chunked_upload
-    = { id: chunked_upload_id;
-        ofs: int;
-        expires: Date.t }
+  type session_id = private string
 
   val get_file : t -> ?rev: string -> ?start: int -> ?len: int ->
                  string -> (metadata * string Lwt_stream.t) option Lwt.t
@@ -312,15 +318,11 @@ module type S = sig
     | `Stream of string Lwt_stream.t
     | `Stream_len of string Lwt_stream.t * int] -> metadata Lwt.t
 
-  val chunked_upload :
-    t -> ?id: chunked_upload_id -> ?ofs: int ->
-    [ `String of string
-    | `Strings of string list
-    | `Stream of string Lwt_stream.t ] -> chunked_upload Lwt.t
-
-  val commit_chunked_upload : t -> ?locale: string -> ?overwrite: bool ->
-                              ?parent_rev: string -> ?autorename: bool ->
-                              chunked_upload_id -> string -> metadata Lwt.t
+  val start_upload_session : t -> session_id Lwt.t
+  val upload_session_append : t -> ?close:bool -> offset:int -> session_id -> [ `String of string
+     | `Strings of string list
+     | `Stream of string Lwt_stream.t ] -> unit Lwt.t
+  val finish_upload_session : t -> ?mode:string -> ?mute:bool -> ?overwrite:bool -> ?autorename:bool -> offset:int -> path:string -> session_id -> metadata Lwt.t
 
   val thumbnails : t -> ?format: [ `Jpeg | `Png  | `Bmp ]
                    -> ?size: [ `Xs | `S | `M | `L | `Xl ] -> string ->
@@ -358,7 +360,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
   module OAuth2 = struct
 
     let authorize_uri =
-      Uri.of_string "https://www.dropbox.com/1/oauth2/authorize"
+      Uri.of_string "https://www.dropbox.com/oauth2/authorize"
 
     let authorize ?(state="") ?(force_reapprove=false) ?(disable_signup=false)
                   ~id:client_id response =
@@ -400,7 +402,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
            Some (get_query_param "access_token" q,  state)
          with Not_found -> None
 
-    let token_uri = Uri.of_string "https://api.dropbox.com/1/oauth2/token"
+    let token_uri = Uri.of_string "https://api.dropbox.com/oauth2/token"
 
     let token ?redirect_uri code ~id ~secret =
       (* FIXME: do we want to allow the possibility to use HTTP basic
@@ -429,7 +431,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
                       duration: float option;
                       lat_long: (float * float) option }
 
-  type chunked_upload_id = string
+  type session_id = string
 
   type t = OAuth2.token
 
@@ -441,7 +443,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
     let bearer = "Bearer " ^ (token t) in
     Cohttp.Header.init_with "Authorization" bearer
 
-  let info_uri = Uri.of_string "https://api.dropbox.com/1/account/info"
+  let info_uri = Uri.of_string "https://api.dropbox.com/2/users/get_current_account"
 
   let info ?locale t =
     let u = match locale with
@@ -727,33 +729,59 @@ module Make(Client: Cohttp_lwt.Client) = struct
     >>= check_errors >>= fun (_, body) -> Cohttp_lwt_body.to_string body
     >>= fun body -> return(Json.metadata_of_string body)
 
-  let chunked_upload_uri =
-    Uri.of_string "https://api-content.dropbox.com/1/chunked_upload"
+  let upload_session_uri action =
+    Uri.of_string
+      (Printf.sprintf "https://api-content.dropbox.com/2/files/upload_session/%s" action)
 
-  let chunked_upload t ?(id="") ?(ofs=0) chunked_data =
-    let q = if id <> "" then [("upload_id", [id])] else [] in
-    let q = if ofs <> 0 then ("offset", [string_of_int ofs]) :: q else q in
-    let u = Uri.with_query chunked_upload_uri q in
-    Client.put ~body:(chunked_data :> Cohttp_lwt_body.t)
-               ~chunked:true ~headers:(headers t) u
+  let start_upload_session t =
+    let u = upload_session_uri "start" in 
+    Client.post ~headers:(headers t) u
     >>= check_errors >>= fun (_, body) ->
     Cohttp_lwt_body.to_string body >>= fun body ->
-    return(Json.chunked_upload_of_string body)
+    return((Json.upload_session_of_string body).session_id)
 
+  let upload_session_append t ?(close=false) ~offset session_id chunked_data =
+    let u = upload_session_uri "append_v2" in
+    let headers = headers t in
+    let cursor =
+      {session_id=session_id;offset=offset}
+    in
+    let params = {
+      append_cursor=cursor;close=close
+    } in
+    let payload =
+      Dropbox_j.string_of_upload_session_append params
+    in
+    let headers =
+      Cohttp.Header.add headers "Dropbox-API-Arg" payload
+    in
+    Client.post ~body:(chunked_data :> Cohttp_lwt_body.t)
+                ~headers ~chunked:true u
+     >>= check_errors >>= fun _ -> return ()
 
-  let commit_chunked_upload t ?(locale="") ?(overwrite=true) ?(parent_rev="")
-                            ?(autorename=true) upload_id fn =
-    let u = Uri.of_string("https://api-content.dropbox.com/1\
-                           /commit_chunked_upload/auto/" ^ fn) in
-    let q = [("overwrite",[string_of_bool overwrite]);
-             ("autorename",[string_of_bool autorename]);
-             ("upload_id",[upload_id])] in
-    let q = if locale <> "" then ("locale", [locale]) :: q else q in
-    let q = if parent_rev <> "" then ("parent_rev",[parent_rev]) :: q else q in
-    let u = Uri.with_query u q in
-    Client.post ~headers:(headers t) u >>= check_errors
-    >>= fun (_, body) -> Cohttp_lwt_body.to_string body
-    >>= fun body -> return(Json.metadata_of_string body)
+  let finish_upload_session t ?(mode="add") ?(mute=false) ?(overwrite=true)
+                              ?(autorename=false) ~offset ~path session_id =
+    let u = upload_session_uri "finish" in
+    let headers = headers t in
+    let cursor =
+      {session_id=session_id;offset=offset}
+    in
+    let commit =
+      {path=path;mode=mode;mute=mute;autorename=autorename}
+    in
+    let params =
+      {finish_cursor=cursor;commit=commit}
+    in
+    let payload =
+      Dropbox_j.string_of_upload_session_finish params
+    in
+    let headers =
+      Cohttp.Header.add headers "Dropbox-API-Arg" payload
+    in
+    Client.post ~headers u
+    >>= check_errors >>= fun (_, body) ->
+    Cohttp_lwt_body.to_string body >>= fun body ->
+    return(Json.metadata_of_string body)
 
 
   let thumbnails t ?(format=`Jpeg) ?(size=`S) fn =
