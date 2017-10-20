@@ -122,6 +122,31 @@ type link = { url: string;
 
 type visibility = json wrap <ocaml module="Dropbox_json.Visibility">
 
+type create_link_settings = {
+  requested_visibility: string
+}
+
+type create_link_params = {
+  path <ocaml name="create_path">: string;
+  ?settings: create_link_settings option
+}
+
+type create_link_permissions = {
+  can_revoke: bool;
+  resolved_visibility: tagged;
+  requested_visibility: tagged;
+  ?revoke_failure_reason: tagged option
+}
+
+type create_link_result = {
+  tag <json name=".tag">: string;
+  url: string;
+  name: string;
+  link_permissions: create_link_permissions;
+  id: string;
+  expires: date;
+  ?path_lower: string option }
+
 type shared_link = { url: string;
                      expires: date;
                      visibility: visibility }

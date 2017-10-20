@@ -584,37 +584,24 @@ module type S = sig
     ]
   (** The visibility of a [shared_link]. *)
 
-  type shared_link
-    = Dropbox_t.shared_link
-    = { url: string; (** The link URL to the file or directory *)
-        expires: Date.t; (** The link's expiration date *)
-        visibility: visibility;
-        (** Dropbox for Business users can set restrictions on shared
-            links; the visibility field indicates what (if any)
-            restrictions are set on this particular link. Possible
-            values include: [`Public] (anyone can view), [`Team_only]
-            (only the owner's team can view), [`Password] (a password
-            is required), [`Team_and_password] (a combination of
-            [`Team_only] and [`Password] restrictions), or
-            [`Shared_folder_only] (only members of the enclosing
-            shared folder can view).  Note that Dropbox says that
-            other values may be added at any time (these will be
-            captured by [`Other]). *)
-      }
+  type create_link_permissions = Dropbox_t.create_link_permissions = {
+    can_revoke: bool;
+    resolved_visibility: tagged;
+    requested_visibility: tagged;
+    revoke_failure_reason: tagged option
+  }
 
-  val shares : t -> ?locale: string -> ?short_url: bool -> string ->
-               shared_link option Lwt.t
-  (** [shares t path] return a [shared_link] to a file or folder.
-      A return value of [None] means that the file does not exist.
+  type create_link_result = Dropbox_t.create_link_result = {
+    tag: string;
+    url: string;
+    name: string;
+    link_permissions: create_link_permissions;
+    id: string;
+    expires: Dropbox_date.t;
+    path_lower: string option
+  }
 
-      @param locale Specify language settings for user error messages
-      and other language specific text. See the
-      {{:https://www.dropbox.com/developers/core/docs#param.locale}Dropbox
-      documentation} for more information about supported locales.
-
-      @param short_url When [true] (default), the URL returned will be
-      shortened using the Dropbox URL shortener. If [false], the URL will link
-      directly to the file's preview page. *)
+  val create_link : t -> ?visibility:string -> string -> create_link_result Lwt.t
 
   type link
     = Dropbox_t.link

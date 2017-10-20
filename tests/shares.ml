@@ -1,6 +1,7 @@
 open Lwt
 module D = Dropbox_lwt_unix
 
+(*
 let shares t fn =
   D.shares t fn >>= function
   | Some shared_l -> Lwt_io.printlf "%s"
@@ -14,3 +15,4 @@ let main t args =
 
 let () =
   Common.run main
+*)

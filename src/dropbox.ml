@@ -271,11 +271,22 @@ module type S = sig
     | `Other of string
     ]
 
-  type shared_link
-    = Dropbox_t.shared_link
-    = { url: string;
-        expires: Date.t;
-        visibility: visibility }
+  type create_link_permissions = Dropbox_t.create_link_permissions = {
+    can_revoke: bool;
+    resolved_visibility: tagged;
+    requested_visibility: tagged;
+    revoke_failure_reason: tagged option
+  }
+
+  type create_link_result = Dropbox_t.create_link_result = {
+    tag: string;
+    url: string;
+    name: string;
+    link_permissions: create_link_permissions;
+    id: string;
+    expires: Dropbox_date.t;
+    path_lower: string option
+  }
 
   type session_id = private string
 
@@ -307,8 +318,7 @@ module type S = sig
 
   val copy_ref : t -> string -> copy_ref option Lwt.t
 
-  val shares : t -> ?locale: string -> ?short_url: bool ->
-               string -> shared_link option Lwt.t
+  val create_link : t -> ?visibility:string -> string -> create_link_result Lwt.t
 
   val media : t -> ?locale: string -> string -> link option Lwt.t
 
@@ -448,8 +458,7 @@ module Make(Client: Cohttp_lwt.Client) = struct
   let headers ?(content=[]) (t: t) =
     let bearer = "Bearer " ^ (token t) in
     Cohttp.Header.add_list (Cohttp.Header.init ())
-      (("Authorization",bearer)::
-       ("Content-Type","application/octet-stream")::content)
+      (("Authorization",bearer)::content)
 
   let info_uri = Uri.of_string "https://api.dropbox.com/2/users/get_current_account"
 
@@ -671,17 +680,27 @@ module Make(Client: Cohttp_lwt.Client) = struct
     Client.get ~headers:(headers t) u
     >>= check_errors_404 copy_ref_of_response
 
-  let shares_of_response (_, body) =
-    Cohttp_lwt_body.to_string body
-    >>= fun body -> return(Some(Json.shared_link_of_string body))
+  let sharing_uri action =
+    Uri.of_string
+      (Printf.sprintf "https://api.dropboxapi.com/2/sharing/%s" action)
 
-  let shares t ?(locale="") ?(short_url=true) fn =
-    let u = Uri.of_string("https://api.dropbox.com/1/shares/auto/" ^ fn) in
-    let q = [("short_url",[string_of_bool short_url])] in
-    let q = if locale <> "" then ("locale",[locale]) :: q else q in
-    let u = Uri.with_query u q in
-    Client.post ~headers:(headers t) u
-    >>= check_errors_404 shares_of_response
+  let create_link t ?visibility path =
+    let u = sharing_uri "create_shared_link_with_settings" in
+    let settings = match visibility with
+      | None -> None
+      | Some v -> Some {requested_visibility=v}
+    in
+    let params = {
+      create_path=path;settings=settings
+    } in
+    let payload = Dropbox_j.string_of_create_link_params params in
+    let headers =
+      headers ~content:[("Content-Type","application/json")] t
+    in
+    Client.post ~headers ~body:(`String payload) u
+    >>= check_errors >>= fun (_, body) ->
+    Cohttp_lwt_body.to_string body >>= fun body ->
+    return(Json.create_link_result_of_string body)
 
   let media_of_response (_, body) =
     Cohttp_lwt_body.to_string body
@@ -746,7 +765,10 @@ module Make(Client: Cohttp_lwt.Client) = struct
 
   let start_upload_session t =
     let u = upload_session_uri "start" in 
-    Client.post ~headers:(headers t) u
+    let headers =
+      headers ~content:[("Content-Type","application/octet-stream")] t
+    in
+    Client.post ~headers u
     >>= check_errors >>= fun (_, body) ->
     Cohttp_lwt_body.to_string body >>= fun body ->
     return((Json.upload_session_of_string body).session_id)
@@ -763,7 +785,8 @@ module Make(Client: Cohttp_lwt.Client) = struct
       Dropbox_j.string_of_upload_session_append params
     in
     let headers =
-      headers ~content:[("Dropbox-API-Arg",payload)] t
+      headers ~content:[("Content-Type","application/octet-stream");
+                        ("Dropbox-API-Arg",payload)] t
     in
     Client.post ~body:(chunked_data :> Cohttp_lwt_body.t)
                 ~headers ~chunked:true u
@@ -785,7 +808,8 @@ module Make(Client: Cohttp_lwt.Client) = struct
       Dropbox_j.string_of_upload_session_finish params
     in
     let headers =
-      headers ~content:["Dropbox-API-Arg",payload] t
+      headers ~content:[("Content-Type","application/octet-stream");
+                        ("Dropbox-API-Arg",payload)] t
     in
     Client.post ~headers ~body:(`String "") u
     >>= check_errors >>= fun (_, body) ->

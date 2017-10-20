@@ -2,6 +2,7 @@ open Printf
 open Lwt
 module D = Dropbox_lwt_unix
 
+(*
 let revisions t fn =
   D.revisions t fn >>= function
   | Some metadata_list ->
@@ -21,3 +22,4 @@ let main t args =
 
 let () =
   Common.run main
+*)
