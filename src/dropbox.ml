@@ -58,9 +58,16 @@ let () =
                                     | exn -> None)
 
 
-let fail_error body f =
+let fail_error ?(parse=false) body f =
   Cohttp_lwt_body.to_string body >>= fun body ->
-  let e = Json.error_description_of_string body in
+  let e =
+    if parse then
+      Json.error_description_of_string body
+    else
+      let tag = {tag=body} in
+      {error_summary=body;
+       error=tag}
+  in
   fail(Error(f e))
 
 let check_errors_k k ((rq, body) as r) =
@@ -68,7 +75,7 @@ let check_errors_k k ((rq, body) as r) =
   | `Bad_request -> fail_error body (fun e -> Invalid_arg e)
   | `Unauthorized -> fail_error body (fun e -> Invalid_token e)
   | `Forbidden -> fail_error body (fun e -> Invalid_oauth e)
-  | `Conflict -> fail_error body (fun e -> Conflict e)
+  | `Conflict -> fail_error ~parse:true body (fun e -> Conflict e)
   | `Too_many_requests -> fail_error body (fun e -> Too_many_requests e)
   | `Service_unavailable ->
      (match Cohttp.(Header.get rq.Response.headers "retry-after") with
